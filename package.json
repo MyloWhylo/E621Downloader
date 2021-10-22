@@ -10,6 +10,7 @@
   "author": "MyloWhylo",
   "license": "MIT",
   "dependencies": {
-    "node-fetch": "^3.0.0"
+    "node-fetch": "^3.0.0",
+    "p-limit": "^4.0.0"
   }
 }

@@ -1,0 +1,24 @@
+# Pools to download
+21096
+25746
+13275
+24224
+23080
+20025
+23339
+19459
+20047
+13691
+14032
+10166
+20198
+
+# Individual post IDs
+
+# Searches to download
+avali
+sylveon order:score rating:s
+~michiru_kagemori ~nazuna_hiwatashi order:favcount ?limit:75
+
+# User's favorites to snag
+mylowhylo
