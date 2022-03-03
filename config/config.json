@@ -1,4 +1,12 @@
 {
    "username": "[Your Username]",
    "api_key": "[Your API Key]"
+   "blacklist": [
+      "gore",
+      "scat",
+      "watersports",
+      "young -rating:s",
+      "loli",
+      "shota"
+   ]
 }

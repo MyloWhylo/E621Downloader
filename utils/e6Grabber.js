@@ -1,30 +1,27 @@
 import E6API from "./e621-api.js"
-import { writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "fs";
-import { join, sep } from "path";
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { join } from "path";
 import pLimit from 'p-limit';
+import { getFileNamesRecursive } from "./dirParser.js";
 const limit = pLimit(4);
 
+const config = JSON.parse(readFileSync("./config/config.json", 'utf-8'))
+
 export default class E6Grabber {
-   #parsedInput = {
-      pools: [],
-      posts: [],
-      searches: [],
-      favorites: [],
-   };
-
-   #existingFiles = {
-      rawIDs: [],
-      folderFiles: {}
-   };
-
-   #downloadQueue = [];
-
    #e6API;
-   #logLevel;
 
-   constructor(searchSize, pageSize, logLevel = 0) {
+   constructor(searchSize, pageSize, folders) {
       this.#e6API = new E6API(searchSize, pageSize);
-      this.#logLevel = logLevel;
+      this.folders = folders
+   }
+
+   isBlacklisted(post) {
+      for (let tag of config.blacklist) {
+         for (let tagGroup in post.tags) {
+            if (post.tags[tagGroup].includes(tag)) return true
+         }
+      }
+      return false
    }
 
    async findRelatives(post) {
@@ -55,202 +52,179 @@ export default class E6Grabber {
       return highest;
    }
 
-   recursiveFindFNames(Directory) {
-      if (this.#logLevel > 1) console.log(`Analyzing ${Directory}`);
-      let files = readdirSync(Directory);
-      files.forEach(File => {
-         const Absolute = join(Directory, File);
-         if (statSync(Absolute).isDirectory()) {
-            return this.recursiveFindFNames(Absolute);
-         }
-         else {
-            let dirStructure = Directory.split(sep);
-            let poolLocation = dirStructure.findIndex((element) => element == "Pools");
-            if (poolLocation != -1) {
-               let poolName = dirStructure[poolLocation + 1].split(" - ").shift();
-               if (!(poolName in this.#existingFiles.folderFiles)) {
-                  this.#existingFiles.folderFiles[poolName] = 1
-                  this.#existingFiles.folderFiles[poolName] = 1;
-               }
-               else this.#existingFiles.folderFiles[poolName]++;
-            }
-            return this.#existingFiles.rawIDs.push(File.split(".")[0]);
-         }
-      });
-   }
-
    parseInput(input) {
-      if (this.#logLevel > -1) console.log("Parsing Inputs...");
-      let currentType = -1;
-      for (const line of input) {
-         if (line == "") continue; // Ignore blank line
-         else if (line.startsWith("#")) { // On comment detect, increment type counter
-            currentType++;
-            continue;
-         } else {
-            switch (currentType) {
-               case 0: // Add Pool
-                  this.#parsedInput.pools.push(line.trim());
-                  break;
-
-               case 1: // Add Post
-                  this.#parsedInput.posts.push(line.trim());
-                  break;
-
-               case 2: // Add Search
-                  this.#parsedInput.searches.push(line.trim());
-                  break;
-
-               case 3: // Add User
-                  this.#parsedInput.favorites.push(line.trim());
-                  break;
-            }
-         }
-      }
-      if (this.#logLevel > 1) console.log(JSON.stringify(this.#parsedInput, null, 3));
-      if (this.#logLevel > 0) console.log("Parsed.");
+      console.log("Parsing Inputs...");
+      let r = JSON.parse(readFileSync(input, 'utf-8'));
+      return r
    }
 
-   async queueDownloads(baseLocation, relatives = true, forceCheck) {
-      if (this.#logLevel > 0) console.log("Analyzing currently existing files...");
-      this.recursiveFindFNames(baseLocation);
-      if (this.#logLevel > 1) console.log(JSON.stringify(this.#existingFiles.folderFiles, null, 3));
-      if (this.#logLevel > -1) console.log("Queueing pools...");
+   async queueDownloads(baseLocation, toDownload, relatives = true, forceCheck) {
+      console.log("Preparing to queue...");
+      let fNames = await getFileNamesRecursive(baseLocation);
+      let inputs = this.parseInput(toDownload);
 
-      for (const pool of this.#parsedInput.pools) {
-         let poolMetadata = await this.#e6API.getPoolMetadata(pool);
+      let r = [];
+
+      process.stdout.write("Queueing pools");
+
+      let allPools = await this.#e6API.getMultiplePoolsMetadata(inputs.pools);
+      for (const poolMetadata of allPools) {
          let name = `${poolMetadata.id} - ${poolMetadata.name}`;
 
-         let postsOnDisk = poolMetadata.id in this.#existingFiles.folderFiles ? this.#existingFiles.folderFiles[poolMetadata.id] : 0;
-         if (this.#logLevel > 0) console.log(`\tPool ${poolMetadata.id}\texpected: ${poolMetadata.post_count},\ton disk: ${postsOnDisk}`);
-         if (postsOnDisk == poolMetadata.post_count) continue;
+         let thisPool = fNames.pools;
+         let hasMember = poolMetadata.id in thisPool;
+         let postsOnDisk = hasMember ? thisPool[poolMetadata.id].length : 0;
 
+         process.stdout.write(postsOnDisk == poolMetadata.post_count ? '.' : '!');
+
+         if (postsOnDisk == poolMetadata.post_count) continue;
          let folder = join(baseLocation, "Pools", name);
-         let poolPosts = await this.#e6API.getPoolPosts(pool);
+         let poolPosts = await this.#e6API.getPoolPosts(poolMetadata.id);
 
          for (const post of poolPosts) {
-            if (this.#existingFiles.rawIDs.includes(post.id.toString()) && !forceCheck) continue;
+            let fileOnDisk = hasMember ? thisPool[poolMetadata.id].includes(post.id.toString()) : false;
+            if (fileOnDisk && !forceCheck) continue;
             let thisPost = {};
             thisPost.post = post;
             thisPost.location = folder;
-            this.#downloadQueue.push(thisPost);
+            r.push(thisPost);
          }
       }
 
-      if (this.#logLevel > -1) console.log("Queueing posts...");
-      for (const post of this.#parsedInput.posts) {
+      process.stdout.write("\nQueueing posts");
+      for (const post of inputs.posts) {
          let initialPost = await this.#e6API.getPost(post);
-         if (this.#existingFiles.rawIDs.includes(initialPost.id.toString()) && !forceCheck) continue;
          let postsFolder = join(baseLocation, "Posts");
          if (relatives) {
-            let rootNode = this.findRootPost(initialPost);
-            let folder = join(postsFolder, rootNode.id);
+            let rootNode = await this.findRootPost(initialPost);
+            let folder = this.folders ? join(postsFolder, rootNode.id.toString()) : postsFolder;
             for (const relative of await this.findRelatives(rootNode)) {
-               let thisPost = {};
-               thisPost.post = relative;
-               thisPost.location = folder;
-               this.#downloadQueue.push(thisPost);
+               if (this.isBlacklisted(relative)) continue;
+               let thisPost = {
+                  post: relative,
+                  location: folder
+               };
+               r.push(thisPost);
             }
          } else {
-            let thisPost = {};
-            thisPost.post = initialPost;
-            thisPost.location = postsFolder;
-            this.#downloadQueue.push(thisPost);
+            let thisPost = {
+               post: initialPost,
+               location: postsFolder
+            };
+            r.push(thisPost);
          }
+         process.stdout.write('.')
       }
 
-      if (this.#logLevel > -1) console.log("Queueing searches...");
-      for (const search of this.#parsedInput.searches) {
-         if (this.#logLevel > 0) console.log(`\tQuery: ${search}`);
-         let searchFolder = join(baseLocation, "Searches", search);
-         let results = await this.#e6API.getSearch(search);
-         if (this.#logLevel > 1) console.log(search, JSON.stringify(results, null, 3));
-         for (const post of results.posts) {
-            let existsOnDisk = this.#existingFiles.rawIDs.includes(post.id.toString());
-            let isInQueue = this.#downloadQueue.some(e => e.post.id == post.id);
+      process.stdout.write("\nQueueing searches");
+      for (const search of inputs.searches) {
+         let tags = search.query;
+         let limit = search.limit;
+         let searchFolder = join(baseLocation, "Searches", tags);
 
-            if (this.#logLevel > 1) console.log(post.id, existsOnDisk, isInQueue);
-            if ((existsOnDisk || isInQueue) && !forceCheck) {
-               if (this.#logLevel > 1) console.log(`\tSkipping post ${post.id}, already exists.`);
-               continue;
-            }
-            
+         let inTags = tags.split(" ");
+         let searchTags = "";
+
+         for (let tag of inTags) {
+            searchTags += `${tag}+`;
+         }
+
+         for (let tag of config.blacklist) {
+            searchTags += `-${tag}+`
+         }
+
+         let infinite = (limit == -1) ? true : false;
+         let results = await this.#e6API.getSearch(searchTags, limit = limit, infinite = infinite);
+         process.stdout.write('.');
+
+         for (const post of results) {
+            let thisSearch = fNames.searches;
+            let hasMember = tags in thisSearch;
+            let existsOnDisk = hasMember ? thisSearch[tags].includes(post.id.toString()) : false;
+            let isInQueue = r.some(e => e.post.id == post.id);
+
+            if ((existsOnDisk || isInQueue) && !forceCheck) continue;
+
             if (relatives) {
                let rootNode = await this.findRootPost(post);
                if (!rootNode.relationships.has_active_children) {
                   let thisPost = {};
                   thisPost.post = post;
                   thisPost.location = searchFolder;
-                  this.#downloadQueue.push(thisPost);
+                  r.push(thisPost);
                } else {
-                  let folder = join(searchFolder, rootNode.id.toString());
+                  let folder = this.folders ? join(searchFolder, rootNode.id.toString()) : searchFolder;
                   let relatives = await this.findRelatives(rootNode);
-                  if (this.#logLevel > 1) console.log(JSON.stringify(relatives, null, 3));
+
                   for (const relative of relatives) {
-                     let thisPost = {};
-                     thisPost.post = relative;
-                     thisPost.location = folder;
-                     this.#downloadQueue.push(thisPost);
+                     if (this.isBlacklisted(relative)) continue;
+                     let thisPost = {
+                        post: relative,
+                        location: folder
+                     };
+                     r.push(thisPost);
                   }
                }
 
             } else {
-               let thisPost = {};
-               thisPost.post = post;
-               thisPost.location = searchFolder;
-               this.#downloadQueue.push(thisPost);
+               let thisPost = {
+                  post: post,
+                  location: postsFolder
+               };
+               r.push(thisPost);
             }
          }
       }
 
-      if (this.#logLevel > -1) console.log("Queueing favorites...");
-      for (const user of this.#parsedInput.favorites) {
-         if (this.#logLevel > 0) console.log(`\tUser: ${user}`);
+      process.stdout.write("\nQueueing favorites");
+      for (const user of inputs.favorites) {
          let userFolder = join(baseLocation, "Favorites", user);
          let results = await this.#e6API.getFavorites(user);
+         process.stdout.write('.');
 
          for (const post of results.posts) {
-            let existsOnDisk = this.#existingFiles.rawIDs.includes(post.id.toString());
-            let isInQueue = this.#downloadQueue.some(e => e.post.id == post.id);
+            let users = fNames.favorites;
+            let hasMember = user in users;
+            let existsOnDisk = hasMember ? users[user].includes(post.id.toString()) : false;
 
-            if (this.#logLevel > 1) console.log(post.id, existsOnDisk, isInQueue);
-            if ((existsOnDisk || isInQueue) && !forceCheck) {
-               if (this.#logLevel > 1) console.log(`\tSkipping post ${post.id}, already exists.`);
-               continue;
-            }
+            let isInQueue = r.some(e => e.post.id == post.id);
+            if ((existsOnDisk || isInQueue) && !forceCheck) continue;
             if (relatives) {
                let rootNode = await this.findRootPost(post);
                if (!rootNode.relationships.has_active_children) {
                   let thisPost = {};
                   thisPost.post = post;
                   thisPost.location = userFolder;
-                  this.#downloadQueue.push(thisPost);
+                  r.push(thisPost);
                } else {
-                  let folder = join(userFolder, rootNode.id.toString());
+                  let folder = this.folders ? join(userFolder, rootNode.id.toString()) : userFolder;
                   let relatives = await this.findRelatives(rootNode);
                   for (const relative of relatives) {
-                     let thisPost = {};
-                     thisPost.post = relative;
-                     thisPost.location = folder;
-                     this.#downloadQueue.push(thisPost);
+                     let thisPost = {
+                        post: relative,
+                        location: folder
+                     };
+                     r.push(thisPost);
                   }
                }
 
             } else {
-               let thisPost = {};
-               thisPost.post = post;
-               thisPost.location = userFolder;
-               this.#downloadQueue.push(thisPost);
+               let thisPost = {
+                  post: post,
+                  location: postsFolder
+               };
+               r.push(thisPost);
             }
          }
       }
-      if (this.#logLevel > 0) console.log("Queueing done.");
+      console.log("");
+      return r;
    }
 
-   async downloadPosts() {
-      if (this.#logLevel > -1) console.log("Downloading posts...");
+   async downloadPosts(queue) {
+      console.log("Downloading posts...");
       let prunedQueue = []
-      for (const entry of this.#downloadQueue) {
+      for (const entry of queue) {
          let post = entry.post;
          let fname = `${post.id}.${post.file.ext}`;
          let name = join(entry.location, fname);
@@ -259,19 +233,14 @@ export default class E6Grabber {
             mkdirSync(entry.location, { recursive: true });
          }
          entry.name = name;
-         if (!prunedQueue.some(e => e.name == entry.name)) {
-            if (this.#logLevel > 1) console.log(JSON.stringify(prunedQueue, null, 3));
-            prunedQueue.push(entry);
-         } else {
-            if (this.#logLevel > 1) console.log(`Queue already includes entry!`);
-         }
+         if (!prunedQueue.some(e => e.name == entry.name)) prunedQueue.push(entry);
       }
 
       let promises = prunedQueue.map(entry => {
          return limit(async () => {
-            if (this.#logLevel > 1) console.log(`Downloading ${entry.name}`);
+            console.log(`Downloading ${entry.name}`);
             let file = await this.#e6API.download(entry.post);
-            writeFileSync(entry.name, file);
+            writeFileSync(entry.name, Buffer.from(file));
          });
       });
 
@@ -279,7 +248,6 @@ export default class E6Grabber {
          const result = await Promise.all(promises);
       })();
 
-      if (this.#logLevel > -1) console.log("Downloaded posts!");
-      if (this.#logLevel > 0) console.log(`Number of requests: ${this.#e6API.requests}`);
+      console.log(`Downloaded ${this.#e6API.downloads} post${this.#e6API.downloads != 1 ? "s":""} in ${this.#e6API.requests} requests.`);
    }
 }
