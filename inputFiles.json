@@ -1,39 +1,6 @@
 {
    "pools":[
-      10166,
-      13275,
-      13665,
-      13691,
-      14032,
-      18460,
-      18892,
-      19459,
-      19668,
-      19707,
-      20025,
-      20047,
-      21096,
-      21384,
-      21802,
-      22034,
-      23080,
-      23325,
-      23339,
-      23677,
-      23940,
-      24217,
-      24224,
-      24978,
-      25024,
-      25182,
-      25236,
-      25746,
-      26168,
-      26377,
-      27289,
-      27363,
-      27391,
-      27664
+      20198
    ],
 
    "posts": [
@@ -41,19 +8,10 @@
 
    "searches": [
       {
-         "limit": -1, 
-         "query": "the-minuscule-task"
-      },
-      {
          "limit": 100,
-         "query": "avali order:favcount -animated"
-      },
-      {
-         "limit": -1,
-         "query": "~michiru_kagemori ~nazuna_hiwatashi ~shirou_ogami ~marie_itami -animated"
+         "query": "avali order:favcount -animated rating:s"
       }
    ],
    "favorites": [
-      "mylowhylo"
    ]
 }
