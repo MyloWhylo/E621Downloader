@@ -78,6 +78,9 @@ export default class E6Grabber {
          process.stdout.write(postsOnDisk == poolMetadata.post_count ? '.' : '!');
 
          if (postsOnDisk == poolMetadata.post_count) continue;
+         else if (postsOnDisk > poolMetadata.post_count) {
+            console.error(`Pool ${poolMetadata.name} (${poolMetadata.id}) has more posts on disk than in the pool!`);
+         }
          let folder = join(baseLocation, "Pools", name);
          let poolPosts = await this.#e6API.getPoolPosts(poolMetadata.id);
 
@@ -92,24 +95,29 @@ export default class E6Grabber {
       }
 
       process.stdout.write("\nQueueing posts");
+      let postsFolder = join(baseLocation, "Posts");
       for (const post of inputs.posts) {
+         let hasMember = post in fNames.posts;
+         
+         let existsOnDisk = hasMember ? fNames.posts[post].includes(post.toString()) : false;
+         if (existsOnDisk && !forceCheck) continue;
+
          let initialPost = await this.#e6API.getPost(post);
-         let postsFolder = join(baseLocation, "Posts");
+         let thisPostFolder = join(postsFolder, post.toString());
          if (relatives) {
             let rootNode = await this.findRootPost(initialPost);
-            let folder = this.folders ? join(postsFolder, rootNode.id.toString()) : postsFolder;
             for (const relative of await this.findRelatives(rootNode)) {
                if (this.isBlacklisted(relative)) continue;
                let thisPost = {
                   post: relative,
-                  location: folder
+                  location: thisPostFolder
                };
                r.push(thisPost);
             }
          } else {
             let thisPost = {
                post: initialPost,
-               location: postsFolder
+               location: thisPostFolder
             };
             r.push(thisPost);
          }
@@ -141,9 +149,8 @@ export default class E6Grabber {
             let thisSearch = fNames.searches;
             let hasMember = tags in thisSearch;
             let existsOnDisk = hasMember ? thisSearch[tags].includes(post.id.toString()) : false;
-            let isInQueue = r.some(e => e.post.id == post.id);
 
-            if ((existsOnDisk || isInQueue) && !forceCheck) continue;
+            if (existsOnDisk && !forceCheck) continue;
 
             if (relatives) {
                let rootNode = await this.findRootPost(post);
@@ -185,10 +192,10 @@ export default class E6Grabber {
          for (const post of results.posts) {
             let users = fNames.favorites;
             let hasMember = user in users;
-            let existsOnDisk = hasMember ? users[user].includes(post.id.toString()) : false;
 
-            let isInQueue = r.some(e => e.post.id == post.id);
-            if ((existsOnDisk || isInQueue) && !forceCheck) continue;
+            let existsOnDisk = hasMember ? users[user].includes(post.id.toString()) : false;
+            if (existsOnDisk && !forceCheck) continue;
+
             if (relatives) {
                let rootNode = await this.findRootPost(post);
                if (!rootNode.relationships.has_active_children) {

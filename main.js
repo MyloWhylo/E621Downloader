@@ -66,12 +66,15 @@ for (let ii = 2; ii < process.argv.length; ii++) {
       console.log(`Options:`);
       console.log(`  -inFile <filename>\tUse specified file instead of default`);
       console.log(`  -outFolder <dir>\tWrite to specified folder instead of default`);
-      console.log(`  -folder\t Put all relatives in a seperate folder`)
+      console.log(`  -folders\t Put all relatives in a seperate folder`)
       console.log(`  -searchLimit <limit>\tLimit searches to <limit> posts`);
       console.log(`  -pageLimit <limit>\tLimit posts per page to <limit> posts`);
       console.log(`  -relatives\t\tDownloads post relatives (very slow!)`);
       console.log(`  -forceCheck\t\tForce recheck of every post`);
       console.log(`  -?, -help\t\tPrints this screen`);
+      process.exit();
+   } else {
+      console.error(`Invalid argument at position ${ii - 1}! (${process.argv[ii]})`);
       process.exit();
    }
 }

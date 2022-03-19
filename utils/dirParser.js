@@ -16,6 +16,7 @@ async function toObject(iter = empty()) {
    let r = {
       rawIDs: [],
       pools: {},
+      posts: {},
       searches: {},
       favorites: {}
    };
@@ -28,6 +29,15 @@ async function toObject(iter = empty()) {
             r.pools[poolName] = [];
          }
          r.pools[poolName].push(dirStructure.at(-1).split(".")[0]);
+      }
+
+      let postLocation = dirStructure.findIndex((element) => element == "Posts");
+      if (postLocation != -1) {
+         let postName = dirStructure[postLocation + 1];
+         if (!(postName in r.posts)) {
+            r.posts[postName] = [];
+         }
+         r.posts[postName].push(dirStructure.at(-1).split(".")[0]);
       }
 
       let searchLocation = dirStructure.findIndex((element) => element == "Searches");
